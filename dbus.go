@@ -202,6 +202,8 @@ func storeSlice(dest, src reflect.Value) error {
 	case src.Type() == interfacesType && dest.Kind() == reflect.Struct:
 		//The decoder always decodes structs as slices of interface{}
 		return storeStruct(dest, src)
+	case (dest.Kind() == reflect.Struct) && (dest.NumField() == src.Len()) && isVariant(src.Type().Elem()):
+		return storeSliceIntoStruct(dest, src)
 	case !kindsAreCompatible(dest.Type(), src.Type()):
 		return fmt.Errorf(
 			"dbus.Store: type mismatch: "+
@@ -246,6 +248,38 @@ func storeStruct(dest, src reflect.Value) error {
 			src.Len(), len(dval))
 	}
 	return Store(src.Interface().([]interface{}), dval...)
+}
+
+func storeSliceIntoStruct(dest, src reflect.Value) error {
+
+	if src.Len() != dest.NumField() {
+		return fmt.Errorf("dbus.Store: slice: " +
+			"destination struct does not have enough fields; " +
+			"need: %d have: %d", dest.NumField(), src.Len())
+	}
+
+	if !isVariant(src.Type().Elem()) {
+		return fmt.Errorf("dbus.Store: cannot store a slice of " +
+			"anything other than variant into a struct")
+	}
+
+	var err error
+	for i := 0; i < dest.NumField(); i++ {
+		field := dest.Field(i)
+		variantItem, ok := src.Index(i).Interface().(Variant)
+		if !ok {
+			return fmt.Errorf("dbus.Store: expected dbus.Variant, received %s",
+				src.Index(i).Type().String())
+		}
+
+		err = store(field.Addr(), src.Index(i))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+
 }
 
 func storeSliceIntoVariant(dest, src reflect.Value) error {
